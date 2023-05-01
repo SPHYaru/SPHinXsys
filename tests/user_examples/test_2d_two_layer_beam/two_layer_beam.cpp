@@ -7,6 +7,8 @@
  * internal constrained subregion.                                             *
  * ----------------------------------------------------------------------------*/
 #include "sphinxsys.h"
+#include "composite_material.h"
+#include "elastic_energy.h"
 using namespace SPH;
 //------------------------------------------------------------------------------
 // global parameters for the case
@@ -23,9 +25,18 @@ BoundingBox system_domain_bounds(Vec2d(-SL - BW, -PL / 2.0),
 //----------------------------------------------------------------------
 //	Material properties of the fluid.
 //----------------------------------------------------------------------
-Real rho0_s = 1.0e3;		 // reference density
-Real Youngs_modulus = 2.0e6; // reference Youngs modulus
-Real poisson = 0.3975;		 // Poisson ratio
+Real rho0_s1 = 1.0e3;		 //reference density
+Real Youngs_modulus1 = 2.0e6; //reference Youngs modulus
+Real poisson1 = 0.4;		 //Poisson ratio
+
+Real rho0_s2 = 1.0e3;		 //reference density
+Real Youngs_modulus2 = 1.0e6; //reference Youngs modulus
+Real poisson2 = 0.4;		 //Poisson ratio
+
+Real equivalent_Youngs = (Youngs_modulus1 * Youngs_modulus1 + 14 * Youngs_modulus1 * Youngs_modulus2 + Youngs_modulus2 * Youngs_modulus2)
+/ (8 * (Youngs_modulus1 + Youngs_modulus2));
+Real k_0 = equivalent_Youngs / (3 - 6 * poisson1);
+Real c_s = sqrt(k_0 / rho0_s1);
 //----------------------------------------------------------------------
 //	Parameters for initial condition on velocity
 //----------------------------------------------------------------------
@@ -75,11 +86,51 @@ public:
 		Real x = pos_[index_i][0] / PL;
 		if (x > 0.0)
 		{
-			vel_[index_i][1] = vf * particles_->elastic_solid_.ReferenceSoundSpeed() *
+			vel_[index_i][1] = vf * c_s *
 							   (M * (cos(kl * x) - cosh(kl * x)) - N * (sin(kl * x) - sinh(kl * x))) / Q;
 		}
 	};
 };
+
+//----------------------------------------------------------------------
+class SolidBodyMaterial : public CompositeMaterial
+{
+public:
+	SolidBodyMaterial() : CompositeMaterial(rho0_s1,2)
+	{
+		add<SaintVenantKirchhoffSolid>(rho0_s1, Youngs_modulus1, poisson1);
+		add<SaintVenantKirchhoffSolid>(rho0_s2, Youngs_modulus2, poisson2);
+	};
+};
+
+//	Setup material ID
+//----------------------------------------------------------------------
+class MaterialId
+	: public solid_dynamics::ElasticDynamicsInitialCondition
+{
+public:
+	explicit  MaterialId(SolidBody& solid_body)
+		: solid_dynamics::ElasticDynamicsInitialCondition(solid_body) ,
+		solid_particles_(dynamic_cast<SolidParticles*>(&solid_body.getBaseParticles())),
+		materail_id_(*solid_particles_->getVariableByName<int>("MaterailId"))
+	{};
+	virtual void update(size_t index_i, Real dt = 0.0)
+	{
+		if (pos_[index_i][1] < 0.0)
+		{
+			materail_id_[index_i] = 1;
+		}
+		else
+		{
+			materail_id_[index_i] = 0;
+		}
+	};
+
+protected:
+	SolidParticles* solid_particles_;
+	StdLargeVec<int>& materail_id_;
+};
+
 //----------------------------------------------------------------------
 //	define the beam base which will be constrained.
 //----------------------------------------------------------------------
@@ -106,7 +157,7 @@ int main(int ac, char *av[])
 	//	Creating body, materials and particles.
 	//----------------------------------------------------------------------
 	SolidBody beam_body(system, makeShared<Beam>("BeamBody"));
-	beam_body.defineParticlesAndMaterial<ElasticSolidParticles, SaintVenantKirchhoffSolid>(rho0_s, Youngs_modulus, poisson);
+	beam_body.defineParticlesAndMaterial<ElasticSolidParticles, SolidBodyMaterial>();
 	beam_body.generateParticles<ParticleGeneratorLattice>();
 
 	ObserverBody beam_observer(system, "BeamObserver");
@@ -122,6 +173,7 @@ int main(int ac, char *av[])
 	//-----------------------------------------------------------------------------
 	// this section define all numerical methods will be used in this case
 	//-----------------------------------------------------------------------------
+	SimpleDynamics<MaterialId> CompositematerialID(beam_body);
 	SimpleDynamics<BeamInitialCondition> beam_initial_velocity(beam_body);
 	// corrected strong configuration
 	InteractionDynamics<solid_dynamics::CorrectConfiguration> beam_corrected_configuration(beam_body_inner);
@@ -133,6 +185,8 @@ int main(int ac, char *av[])
 	// clamping a solid body part. This is softer than a direct constraint
 	BodyRegionByParticle beam_base(beam_body, makeShared<MultiPolygonShape>(createBeamConstrainShape()));
 	SimpleDynamics<solid_dynamics::FixBodyPartConstraint> constraint_beam_base(beam_base);
+
+	beam_body.addBodyStateForRecording<int>("MaterailId");
 	//-----------------------------------------------------------------------------
 	// outputs
 	//-----------------------------------------------------------------------------
@@ -140,6 +194,11 @@ int main(int ac, char *av[])
 	BodyStatesRecordingToVtp write_beam_states(io_environment, system.real_bodies_);
 	RegressionTestEnsembleAveraged<ObservedQuantityRecording<Vecd>>
 		write_beam_tip_displacement("Position", io_environment, beam_observer_contact);
+	/** Elastic Energy of beam. */
+	RegressionTestDynamicTimeWarping<ReducedQuantityRecording<ReduceDynamics<solid_dynamics::ElasticEnergy>>>
+		write_beam_elastic_energy(io_environment, beam_body);
+	RegressionTestDynamicTimeWarping<ReducedQuantityRecording<ReduceDynamics<solid_dynamics::SolidKinecticEnergy>>>
+		write_beam_kinetic_energy(io_environment, beam_body);
 	//----------------------------------------------------------------------
 	//	Setup computing and initial conditions.
 	//----------------------------------------------------------------------
@@ -147,6 +206,7 @@ int main(int ac, char *av[])
 	system.initializeSystemConfigurations();
 	beam_initial_velocity.exec();
 	beam_corrected_configuration.exec();
+	CompositematerialID.exec();
 	//----------------------------------------------------------------------
 	//	Setup computing time-step controls.
 	//----------------------------------------------------------------------
@@ -198,6 +258,8 @@ int main(int ac, char *av[])
 		}
 
 		write_beam_tip_displacement.writeToFile(ite);
+		write_beam_elastic_energy.writeToFile(ite);
+		write_beam_kinetic_energy.writeToFile(ite);
 
 		TickCount t2 = TickCount::now();
 		write_beam_states.writeToFile();

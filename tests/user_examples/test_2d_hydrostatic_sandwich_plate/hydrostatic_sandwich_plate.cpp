@@ -1,24 +1,24 @@
 /**
- * @file 	hydrostatic_fsi.cpp
- * @brief 	structure deformation due to hydrostatic pressure under gravity.
- * @details This is the one of the basic test cases
- * for understanding SPH method for fluid-structure-interaction (FSI) simulation.
+ * @file 	hydrostatic_sandwich.cpp
  * @author 	Yujie Zhu, Chi Zhang and Xiangyu Hu
  * @version 0.1
  */
 #include "sphinxsys.h"
+#include "composite_material.h"
+#include "elastic_energy.h"
+#include "composite_elastic_dynamics.h"
 using namespace SPH;
 //----------------------------------------------------------------------
 //	Basic geometry parameters and numerical setup.
 //----------------------------------------------------------------------
 Real DL = 0.2;								  /**< Tank length. */
-Real DH = 0.12;								  /**< Tank height. */
+Real DH = 0.12;;								  /**< Tank height. */
 Real Dam_L = 0.2;							  /**< Water block width. */
 Real Dam_H = 0.1;							  /**< Water block height. */
 Real Gate_width = 0.012;						  /**< Width of the gate. */
 Real particle_spacing_ref = Gate_width / 4.0; /**< Initial reference particle spacing. 8, 10, 12 */
 Real BW = 4.0 * particle_spacing_ref;		  /**< Extending width for BCs. */
-BoundingBox system_domain_bounds(Vec2d(-BW, -BW), Vec2d(DL + BW, DH + BW));
+BoundingBox system_domain_bounds(Vec2d(-10.0 * BW, -10.0 * BW), Vec2d(DL + BW, DH + BW));
 //----------------------------------------------------------------------
 //	Define the corner point of water block geometry.
 //----------------------------------------------------------------------
@@ -45,7 +45,7 @@ Vec2d ConstrainRP_lt(Dam_L, 0.0);
 Vec2d ConstrainRP_rt(Dam_L + BW, 0.0);
 Vec2d ConstrainRP_rb(Dam_L + BW, -Gate_width);
 //observer location
-StdVec<Vecd> observation_location = { Vecd(0.5 * Dam_L, -0.5 * Gate_width) };
+StdVec<Vecd> observation_location = {Vecd(0.5 * Dam_L, -0.5 * Gate_width)};
 //----------------------------------------------------------------------
 //	Material properties of the fluid.
 //----------------------------------------------------------------------
@@ -59,10 +59,17 @@ Real mu_f = rho0_f * U_max * DL / Re; /**< Dynamics viscosity. */
 //----------------------------------------------------------------------
 //	Material properties of the elastic gate.
 //----------------------------------------------------------------------
-Real rho0_s = 1000.0; /**< Reference solid density. */
-Real poisson = 0.0;  /**< Poisson ratio. */
-Real Ae = 2.4e8;	  /**< Normalized Youngs Modulus. */
-Real Youngs_modulus = Ae;
+Real rho0_s1 = 1.0e3;		 //reference density
+Real Youngs_modulus1 = 2.4e8; //reference Youngs modulus
+Real poisson1 = 0.0;		 //Poisson ratio
+
+Real rho0_s2 = 1.0e1;		 //reference density
+Real Youngs_modulus2 = 2.4e6; //reference Youngs modulus
+Real poisson2 = 0.0;		 //Poisson ratio
+
+Real equivalent_Youngs = (7.0 * Youngs_modulus1 + Youngs_modulus2) / 8;
+Real k_0 = equivalent_Youngs / (3 - 6 * poisson1);
+Real c_s = sqrt(k_0 / rho0_s1);
 //----------------------------------------------------------------------
 //	Geometry definition.
 //----------------------------------------------------------------------
@@ -80,7 +87,7 @@ std::vector<Vecd> createWaterBlockShape()
 class WaterBlock : public MultiPolygonShape
 {
 public:
-	explicit WaterBlock(const std::string& shape_name) : MultiPolygonShape(shape_name)
+	explicit WaterBlock(const std::string &shape_name) : MultiPolygonShape(shape_name)
 	{
 		multi_polygon_.addAPolygon(createWaterBlockShape(), ShapeBooleanOps::add);
 	}
@@ -115,7 +122,7 @@ std::vector<Vecd> createInnerWallShape()
 class WallBoundary : public MultiPolygonShape
 {
 public:
-	explicit WallBoundary(const std::string& shape_name) : MultiPolygonShape(shape_name)
+	explicit WallBoundary(const std::string &shape_name) : MultiPolygonShape(shape_name)
 	{
 		multi_polygon_.addAPolygon(createOuterWallShape(), ShapeBooleanOps::add);
 		multi_polygon_.addAPolygon(createInnerWallShape(), ShapeBooleanOps::add);
@@ -141,7 +148,7 @@ std::vector<Vecd> createGateShape()
 class Gate : public MultiPolygonShape
 {
 public:
-	explicit Gate(const std::string& shape_name) : MultiPolygonShape(shape_name)
+	explicit Gate(const std::string &shape_name) : MultiPolygonShape(shape_name)
 	{
 		multi_polygon_.addAPolygon(createGateShape(), ShapeBooleanOps::add);
 	}
@@ -186,6 +193,46 @@ std::vector<Vecd> createGateConstrainShapeRight()
 
 	return gate_constraint_shape;
 }
+
+//----------------------------------------------------------------------
+class SolidBodyMaterial : public CompositeMaterial
+{
+public:
+	SolidBodyMaterial() : CompositeMaterial(rho0_s1)
+	{
+		add<SaintVenantKirchhoffSolid>(rho0_s1, Youngs_modulus1, poisson1);
+		add<SaintVenantKirchhoffSolid>(rho0_s2, Youngs_modulus2, poisson2);
+	};
+};
+
+//	Setup material ID
+//----------------------------------------------------------------------
+class MaterialId
+	: public solid_dynamics::ElasticDynamicsInitialCondition
+{
+public:
+	explicit  MaterialId(SolidBody& solid_body)
+		: solid_dynamics::ElasticDynamicsInitialCondition(solid_body),
+		solid_particles_(dynamic_cast<SolidParticles*>(&solid_body.getBaseParticles())),
+		materail_id_(*solid_particles_->getVariableByName<int>("MaterailId"))
+	{};
+	virtual void update(size_t index_i, Real dt = 0.0)
+	{
+		if (pos_[index_i][1] < -(0.5 * Gate_width - 0.25 * Gate_width) && pos_[index_i][1] > -(0.5 * Gate_width + 0.25 * Gate_width))
+		{
+			materail_id_[index_i] = 1;
+		}
+		else
+		{
+			materail_id_[index_i] = 0;
+		}
+
+	};
+
+protected:
+	SolidParticles* solid_particles_;
+	StdLargeVec<int>& materail_id_;
+};
 //----------------------------------------------------------------------
 //	Main program starts here.
 //----------------------------------------------------------------------
@@ -201,7 +248,7 @@ int main()
 	//----------------------------------------------------------------------
 	//	Creating body, materials and particles.
 	//----------------------------------------------------------------------
-	FluidBody water_block(system, makeShared<WaterBlock>("WaterBody"));
+	FluidBody water_block(system,makeShared<WaterBlock>("WaterBody"));
 	water_block.defineParticlesAndMaterial<FluidParticles, WeaklyCompressibleFluid>(rho0_f, c_f);
 	water_block.generateParticles<ParticleGeneratorLattice>();
 	water_block.addBodyStateForRecording<Real>("Pressure");
@@ -211,8 +258,9 @@ int main()
 	wall_boundary.generateParticles<ParticleGeneratorLattice>();
 
 	SolidBody gate(system, makeShared<Gate>("Gate"));
-	gate.defineParticlesAndMaterial<ElasticSolidParticles, SaintVenantKirchhoffSolid>(rho0_s, Youngs_modulus, poisson);
+	gate.defineParticlesAndMaterial<ElasticSolidParticles, SolidBodyMaterial>();
 	gate.generateParticles<ParticleGeneratorLattice>();
+	gate.addBodyStateForRecording<int>("MaterailId");
 	//----------------------------------------------------------------------
 	//	Particle and body creation of gate observer.
 	//----------------------------------------------------------------------
@@ -225,9 +273,9 @@ int main()
 	//----------------------------------------------------------------------
 	InnerRelation water_block_inner(water_block);
 	InnerRelation gate_inner(gate);
-	ComplexRelation water_block_complex(water_block_inner, { &wall_boundary, &gate });
-	ContactRelation gate_contact(gate, { &water_block });
-	ContactRelation gate_observer_contact(gate_observer, { &gate });
+	ComplexRelation water_block_complex(water_block_inner, {&wall_boundary, &gate});
+	ContactRelation gate_contact(gate, {&water_block});
+	ContactRelation gate_observer_contact(gate_observer, {&gate});
 	//----------------------------------------------------------------------
 	//	Define all numerical methods which are used in this case.
 	//----------------------------------------------------------------------
@@ -241,18 +289,20 @@ int main()
 	ReduceDynamics<fluid_dynamics::AcousticTimeStepSize> get_fluid_time_step_size(water_block);
 	/** Pressure relaxation using verlet time stepping. */
 	Dynamics1Level<fluid_dynamics::Integration1stHalfRiemannWithWall> pressure_relaxation(water_block_complex);
-	Dynamics1Level<fluid_dynamics::Integration2ndHalfRiemannWithWall> density_relaxation(water_block_complex);
+	Dynamics1Level<fluid_dynamics::Integration2ndHalfWithWall> density_relaxation(water_block_complex);
 	InteractionDynamics<fluid_dynamics::ViscousAccelerationWithWall> viscous_acceleration(water_block_complex);
 	DampingWithRandomChoice<InteractionSplit<DampingPairwiseWithWall<Vec2d, DampingPairwiseInner>>>
 		fluid_damping(0.2, water_block_complex, "Velocity", mu_f);
 	SimpleDynamics<NormalDirectionFromBodyShape> wall_boundary_normal_direction(wall_boundary);
 	SimpleDynamics<NormalDirectionFromBodyShape> gate_normal_direction(gate);
+	/** Material ID. */
+	SimpleDynamics<MaterialId> CompositematerialID(gate);
 	/** Corrected configuration. */
 	InteractionDynamics<solid_dynamics::CorrectConfiguration> gate_corrected_configuration(gate_inner);
 	/** Compute time step size of elastic solid. */
 	ReduceDynamics<solid_dynamics::AcousticTimeStepSize> gate_computing_time_step_size(gate);
 	/** Stress relaxation stepping for the elastic gate. */
-	Dynamics1Level<solid_dynamics::Integration1stHalf> gate_stress_relaxation_first_half(gate_inner);
+	Dynamics1Level<solid_dynamics::CompositeIntegration1stHalf> gate_stress_relaxation_first_half(gate_inner);
 	Dynamics1Level<solid_dynamics::Integration2ndHalf> gate_stress_relaxation_second_half(gate_inner);
 	/**Constrain a solid body part.  */
 	BodyRegionByParticle gate_constraint_part(gate, makeShared<MultiPolygonShape>(createGateConstrainShape()));
@@ -271,6 +321,11 @@ int main()
 	/** Output the observed displacement of gate free end. */
 	RegressionTestEnsembleAveraged<ObservedQuantityRecording<Vecd>>
 		write_beam_tip_displacement("Position", io_environment, gate_observer_contact);
+	/** Elastic Energy of beam. */
+	RegressionTestDynamicTimeWarping<ReducedQuantityRecording<ReduceDynamics<solid_dynamics::ElasticEnergy>>>
+		write_beam_elastic_energy(io_environment, gate);
+	RegressionTestDynamicTimeWarping<ReducedQuantityRecording<ReduceDynamics<solid_dynamics::SolidKinecticEnergy>>>
+		write_beam_kinetic_energy(io_environment, gate);
 	//----------------------------------------------------------------------
 	//	Prepare the simulation with cell linked list, configuration
 	//	and case specified initial condition if necessary.
@@ -285,6 +340,8 @@ int main()
 	gate_normal_direction.exec();
 	/** computing linear reproducing configuration for the insert body. */
 	gate_corrected_configuration.exec();
+	/** material id. */
+	CompositematerialID.exec();
 	//----------------------------------------------------------------------
 	//	First output before the main loop.
 	//----------------------------------------------------------------------
@@ -295,8 +352,8 @@ int main()
 	//----------------------------------------------------------------------
 	size_t number_of_iterations = 0;
 	int screen_output_interval = 100;
-	Real end_time = 5;		   /**< End time. */
-	Real output_interval = 0.01;
+	Real end_time = 0.5;		   /**< End time. */
+	Real output_interval = end_time / 50.0;
 	Real dt = 0.0;				   /**< Default acoustic time step sizes. */
 	Real dt_s = 0.0;			   /**< Default acoustic time step sizes for solid. */
 	TickCount t1 = TickCount::now();
@@ -319,38 +376,36 @@ int main()
 			Real relaxation_time = 0.0;
 			//while (relaxation_time < Dt)
 			//{
-			dt = 0.01 * SMIN(get_fluid_time_step_size.exec(), Dt);
-			fluid_damping.exec(dt);
-			/** Fluid relaxation and force computation. */
-			pressure_relaxation.exec(dt);
-			fluid_pressure_force_on_gate.exec();
-			density_relaxation.exec(dt);
-
-			/** Solid dynamics time stepping. */
-			Real dt_s_sum = 0.0;
-			average_velocity_and_acceleration.initialize_displacement_.exec();
-			while (dt_s_sum < dt)
-			{
-				if (dt - dt_s_sum < dt_s)
-					dt_s = dt - dt_s_sum;
-				gate_stress_relaxation_first_half.exec(dt_s);
-				gate_constraint.exec();
-				gate_stress_relaxation_second_half.exec(dt_s);
-				dt_s_sum += dt_s;
-				dt_s = 0.1 * gate_computing_time_step_size.exec();
-			}
-			average_velocity_and_acceleration.update_averages_.exec(dt);
-
-			relaxation_time += dt;
-			integration_time += dt;
-			GlobalStaticVariables::physical_time_ += dt;
+				dt = 0.01 * SMIN(get_fluid_time_step_size.exec(), Dt);
+				fluid_damping.exec(dt);
+				/** Fluid relaxation and force computation. */
+				pressure_relaxation.exec(dt);
+				fluid_pressure_force_on_gate.exec();
+				density_relaxation.exec(dt);
+				/** Solid dynamics time stepping. */
+				Real dt_s_sum = 0.0;
+				average_velocity_and_acceleration.initialize_displacement_.exec();
+				while (dt_s_sum < dt)
+				{
+					if (dt - dt_s_sum < dt_s)
+						dt_s = dt - dt_s_sum;
+					gate_stress_relaxation_first_half.exec(dt_s);
+					gate_constraint.exec();
+					gate_stress_relaxation_second_half.exec(dt_s);
+					dt_s_sum += dt_s;
+					dt_s = 0.1 * gate_computing_time_step_size.exec();
+				}
+				average_velocity_and_acceleration.update_averages_.exec(dt);
+				relaxation_time += dt;
+				integration_time += dt;
+				GlobalStaticVariables::physical_time_ += dt;
 			//}
 
 			if (number_of_iterations % screen_output_interval == 0)
 			{
 				std::cout << std::fixed << std::setprecision(9) << "N=" << number_of_iterations << "	Time = "
-					<< GlobalStaticVariables::physical_time_
-					<< "	Dt = " << Dt << "	dt = " << dt << "	dt_s = " << dt_s << "\n";
+						  << GlobalStaticVariables::physical_time_
+						  << "	Dt = " << Dt << "	dt = " << dt << "	dt_s = " << dt_s << "\n";
 			}
 			number_of_iterations++;
 
@@ -360,13 +415,13 @@ int main()
 			/** one need update configuration after periodic condition. */
 			gate.updateCellLinkedList();
 			gate_contact.updateConfiguration();
-
-
 		}
 		TickCount t2 = TickCount::now();
 		write_real_body_states_to_vtp.writeToFile();
 		/** Output the observed data. */
 		write_beam_tip_displacement.writeToFile(number_of_iterations);
+		write_beam_elastic_energy.writeToFile(number_of_iterations);
+		write_beam_kinetic_energy.writeToFile(number_of_iterations);
 		TickCount t3 = TickCount::now();
 		interval += t3 - t2;
 	}
