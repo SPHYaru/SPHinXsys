@@ -16,7 +16,7 @@ Real DH = 0.12;								  /**< Tank height. */
 Real Dam_L = 0.2;							  /**< Water block width. */
 Real Dam_H = 0.1;							  /**< Water block height. */
 Real Gate_width = 0.012;						  /**< Width of the gate. */
-Real particle_spacing_ref = Gate_width / 4.0; /**< Initial reference particle spacing. 8, 10, 12 */
+Real particle_spacing_ref = Gate_width / 6.0; /**< Initial reference particle spacing. 8, 10, 12 */
 Real BW = 4.0 * particle_spacing_ref;		  /**< Extending width for BCs. */
 BoundingBox system_domain_bounds(Vec2d(-BW, -BW), Vec2d(DL + BW, DH + BW));
 //----------------------------------------------------------------------

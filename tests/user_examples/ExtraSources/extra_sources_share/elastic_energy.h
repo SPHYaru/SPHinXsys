@@ -55,8 +55,8 @@ namespace SPH
 			public ElasticSolidDataSimple
 		{
 		protected:
-			StdLargeVec<Matd>& F_, &stress_PK1_B_;
 			StdLargeVec<Real>& Vol_;
+			StdLargeVec<Matd>& F_, &stress_PK1_B_;
 
 		public:
 			ElasticEnergy(SPHBody& sph_body);

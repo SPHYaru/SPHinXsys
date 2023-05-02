@@ -46,6 +46,7 @@ namespace SPH
 			explicit CompositeIntegration1stHalf(BaseInnerRelation &inner_relation);
 			virtual ~CompositeIntegration1stHalf(){};
 			void initialization(size_t index_i, Real dt = 0.0);
+			void interaction (size_t index_i, Real dt = 0.0);
 		};
 
 	}

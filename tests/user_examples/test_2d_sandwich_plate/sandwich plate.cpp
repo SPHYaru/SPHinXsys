@@ -181,13 +181,14 @@ int main(int ac, char *av[])
 	// time step size calculation
 	ReduceDynamics<solid_dynamics::AcousticTimeStepSize> computing_time_step_size(beam_body);
 	// stress relaxation for the beam
-	Dynamics1Level<solid_dynamics::Integration1stHalf> stress_relaxation_first_half(beam_body_inner);
+	Dynamics1Level<solid_dynamics::CompositeIntegration1stHalf> stress_relaxation_first_half(beam_body_inner);
 	Dynamics1Level<solid_dynamics::Integration2ndHalf> stress_relaxation_second_half(beam_body_inner);
 	// clamping a solid body part. This is softer than a direct constraint
 	BodyRegionByParticle beam_base(beam_body, makeShared<MultiPolygonShape>(createBeamConstrainShape()));
 	SimpleDynamics<solid_dynamics::FixBodyPartConstraint> constraint_beam_base(beam_base);
 
 	beam_body.addBodyStateForRecording<int>("MaterailId");
+	beam_body.addBodyStateForRecording<Real>("Density");
 	//-----------------------------------------------------------------------------
 	// outputs
 	//-----------------------------------------------------------------------------
@@ -215,7 +216,7 @@ int main(int ac, char *av[])
 	Real T0 = 1.0;
 	Real end_time = T0;
 	// time step size for output file
-	Real output_interval = 0.0001 * T0;
+	Real output_interval = 0.01 * T0;
 	Real Dt = 0.1 * output_interval; /**< Time period for data observing */
 	Real dt = 0.0;					 // default acoustic time step sizes
 

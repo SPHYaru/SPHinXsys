@@ -9,7 +9,7 @@ namespace SPH
 	//=================================================================================================//
 	ElasticEnergy::ElasticEnergy(SPHBody& sph_body)
 		: LocalDynamicsReduce<Real, ReduceSum<Real>>(sph_body, Real(0)),
-		ElasticSolidDataSimple(sph_body),F_(particles_->F_), Vol_(particles_->Vol_),
+		ElasticSolidDataSimple(sph_body), Vol_(particles_->Vol_), F_(particles_->F_),
 		stress_PK1_B_(*particles_->getVariableByName<Matd>("CorrectedStressPK1"))
 	{
 		quantity_name_ = "ElasticEnergy";

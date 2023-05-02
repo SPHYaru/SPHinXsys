@@ -15,7 +15,7 @@ Real DH = 0.12;								  /**< Tank height. */
 Real Dam_L = 0.2;							  /**< Water block width. */
 Real Dam_H = 0.1;							  /**< Water block height. */
 Real Gate_width = 0.012;						  /**< Width of the gate. */
-Real particle_spacing_ref = Gate_width / 10.0; /**< Initial reference particle spacing. 8, 10, 12 */
+Real particle_spacing_ref = Gate_width / 6.0; /**< Initial reference particle spacing. 8, 10, 12 */
 Real BW = 4.0 * particle_spacing_ref;		  /**< Extending width for BCs. */
 BoundingBox system_domain_bounds(Vec2d(-10.0 * BW, -10.0 * BW), Vec2d(DL + BW, DH + BW));
 //----------------------------------------------------------------------
@@ -352,7 +352,7 @@ int main()
 	//----------------------------------------------------------------------
 	size_t number_of_iterations = 0;
 	int screen_output_interval = 100;
-	Real end_time = 5;		   /**< End time. */
+	Real end_time = 0.5;		   /**< End time. */
 	Real output_interval = 0.01;
 	Real dt = 0.0;				   /**< Default acoustic time step sizes. */
 	Real dt_s = 0.0;			   /**< Default acoustic time step sizes for solid. */
