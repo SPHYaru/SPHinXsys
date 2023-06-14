@@ -9,7 +9,7 @@ namespace SPH
 		FluidInitialCondition::
 			FluidInitialCondition(SPHBody &sph_body)
 			: LocalDynamics(sph_body), FluidDataSimple(sph_body),
-			  pos_(particles_->pos_), vel_(particles_->vel_) {}
+			  pos_(particles_->pos_), vel_(particles_->vel_){}
 		//=================================================================================================//
 		BaseDensitySummationInner::BaseDensitySummationInner(BaseInnerRelation &inner_relation)
 			: LocalDynamics(inner_relation.getSPHBody()), FluidDataInner(inner_relation),
