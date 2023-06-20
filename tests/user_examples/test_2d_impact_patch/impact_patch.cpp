@@ -14,7 +14,7 @@ using namespace SPH;   // Namespace cite here.
 //----------------------------------------------------------------------
 Real LL = 0.667;                        /**< Liquid column length. */
 Real LH = 2.0;                         /**< Liquid column height. */
-Real particle_spacing_ref = 0.005;    /**< Initial reference particle spacing. */
+Real particle_spacing_ref = LL/150;    /**< Initial reference particle spacing. */
 Real BW = particle_spacing_ref * 4;  /**< Extending width for boundary conditions. */
 BoundingBox system_domain_bounds(Vec2d(-LH, -LH), Vec2d(LL + BW, LH + BW));
 //----------------------------------------------------------------------
@@ -141,7 +141,7 @@ int main(int ac, char *av[])
     /** Apply transport velocity formulation. */
     InteractionDynamics<fluid_dynamics::TransportVelocityCorrectionInner> transport_velocity_correction(water_body_inner);
 
-    Dynamics1Level<fluid_dynamics::Integration1stHalfRiemannCorrect> fluid_pressure_relaxation_correct(water_body_inner);
+    Dynamics1Level<fluid_dynamics::Integration1stHalfRiemann> fluid_pressure_relaxation_correct(water_body_inner);
     Dynamics1Level<fluid_dynamics::Integration2ndHalfRiemann> fluid_density_relaxation(water_body_inner);
     InteractionWithUpdate<fluid_dynamics::DensitySummationFreeSurfaceInner> fluid_density_by_summation(water_body_inner);
     SimpleDynamics<TimeStepInitialization> fluid_step_initialization(water_block);
@@ -215,10 +215,10 @@ int main(int ac, char *av[])
             /** outer loop for dual-time criteria time-stepping. */
             time_instance = TickCount::now();
             fluid_step_initialization.exec();
-            Real advection_dt = 0.1*fluid_advection_time_step.exec();
+            Real advection_dt = 0.3 *fluid_advection_time_step.exec();
             free_surface_indicator.exec();
             fluid_density_by_summation.exec();
-            corrected_configuration_fluid.exec();
+            //corrected_configuration_fluid.exec();
             transport_velocity_correction.exec();
             interval_computing_time_step += TickCount::now() - time_instance;
 
@@ -243,14 +243,14 @@ int main(int ac, char *av[])
                 std::cout << std::fixed << std::setprecision(9) << "N=" << number_of_iterations << "	Time = "
                           << GlobalStaticVariables::physical_time_
                           << "	advection_dt = " << advection_dt << "	acoustic_dt = " << acoustic_dt << "\n";
-
-                write_water_mechanical_energy.writeToFile(number_of_iterations);
-                wave_probe.writeToFile(number_of_iterations);
                 
                 if (number_of_iterations % restart_output_interval == 0)
                     restart_io.writeToFile(number_of_iterations);
             }
             number_of_iterations++;
+
+            write_water_mechanical_energy.writeToFile(number_of_iterations);
+            wave_probe.writeToFile(number_of_iterations);
 
             /** Update cell linked list and configuration. */
             time_instance = TickCount::now();
