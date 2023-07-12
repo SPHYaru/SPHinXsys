@@ -5,13 +5,16 @@
  * integration scheme investigation                                            *
  *-----------------------------------------------------------------------------*/
 #include "sphinxsys.h" // SPHinXsys Library.
+#include "fluid_dynamics_complex_wkgc.hpp"
+#include "fluid_dynamics_inner_wkgc.hpp"
+#include "general_dynamics_wkgc.h"
 using namespace SPH;
 
 /** Set the file path to the stl file. */
 std::string full_path_to_stl_file = "./input/qiu.stl";
 
 // general parameters for geometry
-Real resolution_ref = 0.02;	  // particle spacing
+Real resolution_ref = 0.05;	  // particle spacing
 Real BW = resolution_ref * 4; // boundary width
 Real DL = 5.366;			  // tank length
 Real DH = 2.0;				  // tank height
@@ -63,7 +66,8 @@ public:
 		/** initial velocity profile */
 
 		vel_[index_particle_i][0] = -1.0 * pos_[index_particle_i][0];
-		vel_[index_particle_i][1] = 1.0 * pos_[index_particle_i][1];		
+		vel_[index_particle_i][1] = -1.0 * pos_[index_particle_i][1];
+		vel_[index_particle_i][2] = 2.0 * pos_[index_particle_i][2];
 	}
 };
 
@@ -154,9 +158,9 @@ int main(int ac, char *av[])
 	BoundingBox system_domain_bounds(Vecd(-DL, - DH, - DW), Vecd(DL + BW, DH + BW, DW + BW));
 	SPHSystem system(system_domain_bounds, resolution_ref);
 
-	system.setRunParticleRelaxation(true);
+	system.setRunParticleRelaxation(false);
 	// Tag for reload initially relaxed particles.
-	system.setReloadParticles(false);
+	system.setReloadParticles(true);
 
 	system.handleCommandlineOptions(ac, av);
 	IOEnvironment io_environment(system);
@@ -231,7 +235,8 @@ int main(int ac, char *av[])
 	SimpleDynamics<InitialVelocity> drop_initial_velocity(water_block);
 
 	SimpleDynamics<TimeStepInitialization> initialize_a_fluid_step(water_block);
-	Dynamics1Level<fluid_dynamics::Integration1stHalfRiemann> pressure_relaxation(water_block_inner);
+	InteractionWithUpdate<CorrectionMatrixInner> corrected_configuration_fluid(water_block_inner, 2, 0.3);
+	Dynamics1Level<fluid_dynamics::Integration1stHalfRiemannCorrect> pressure_relaxation(water_block_inner);
 	Dynamics1Level<fluid_dynamics::Integration2ndHalfRiemann> density_relaxation(water_block_inner);
 	InteractionWithUpdate<fluid_dynamics::DensitySummationFreeSurfaceInner> update_density_by_summation(water_block_inner);
 	ReduceDynamics<fluid_dynamics::AdvectionTimeStepSize> get_fluid_advection_time_step_size(water_block, U_f);
@@ -289,6 +294,7 @@ int main(int ac, char *av[])
 			initialize_a_fluid_step.exec();
 			Real Dt = get_fluid_advection_time_step_size.exec();
 			update_density_by_summation.exec();
+			corrected_configuration_fluid.exec();
 
 			Real relaxation_time = 0.0;
 			while (relaxation_time < Dt)

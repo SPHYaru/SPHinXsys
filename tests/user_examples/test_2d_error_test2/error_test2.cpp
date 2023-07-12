@@ -7,14 +7,15 @@
 #include "fluid_dynamics_inner_wkgc.hpp"
 #include "general_dynamics_wkgc.h"
 #include "sphinxsys.h" //SPHinXsys Library.
+#include <random>
 using namespace SPH;   // Namespace cite here.
 #define PI 3.1415926
 //----------------------------------------------------------------------
 //	Basic geometry parameters and numerical setup.
 //----------------------------------------------------------------------
-Real LL = 1.0;                      /**< Liquid column length. */
-Real LH = 1.0;                      /**< Liquid column height. */
-Real particle_spacing_ref = 0.05;   /**< Initial reference particle spacing. */
+Real LL = 2.0;                      /**< Liquid column length. */
+Real LH = 2.0;                      /**< Liquid column height. */
+Real particle_spacing_ref = 0.2;   /**< Initial reference particle spacing. */
 Real BW = particle_spacing_ref * 4; /**< Extending width for boundary conditions. */
 BoundingBox system_domain_bounds(Vec2d(-LL / 2, -LH / 2), Vec2d(LL / 2, LH / 2));
 //----------------------------------------------------------------------
@@ -41,6 +42,30 @@ public:
         multi_polygon_.addAPolygon(water_block_shape, ShapeBooleanOps::add);
     }
 };
+
+//----------------------------------------------------------------------
+//	application dependent initial condition
+//----------------------------------------------------------------------
+
+
+class RandomNoise
+    : public fluid_dynamics::FluidInitialCondition
+{
+public:
+    explicit RandomNoise(SPHBody& sph_body)
+        : fluid_dynamics::FluidInitialCondition(sph_body) {};
+
+    void update(size_t index_i, Real dt)
+    {
+        static std::random_device rd;  
+        static std::mt19937 gen(rd());  
+        static std::uniform_real_distribution<> dis(-0.005, 0.005);
+
+        pos_[index_i][0] += dis(gen);
+        pos_[index_i][1] += dis(gen);
+    }
+};
+
 /**
  * application dependent initial velocity
  */
@@ -66,19 +91,17 @@ public:
             Vecd gradW_ij = inner_neighborhood.dW_ijV_j_[n] * inner_neighborhood.e_ij_[n];
             Vecd r_ji = inner_neighborhood.r_ij_[n] * inner_neighborhood.e_ij_[n];
 
-            //gradient_ += (func_[inner_neighborhood.j_[n]]-func_[index_i]) * B_[index_i] * gradW_ij;
-            gradient_ += (func_[inner_neighborhood.j_[n]] - func_[index_i]) *  gradW_ij;
+            gradient_ += (func_[inner_neighborhood.j_[n]] - func_[index_i]) * B_[index_i] * gradW_ij;
+            //gradient_ += (func_[inner_neighborhood.j_[n]] - func_[index_i]) * gradW_ij;
+             
         }
-
-        gradient_value_[index_i] = gradient_;        
-
-     
+        gradient_value_[index_i] = gradient_;             
     }
 
     void update(size_t index_i, Real dt)
     {
-        func_[index_i] = cos(2.0 * Pi * pos_[index_i][0]);
-        gradient_func_[index_i] = -2.0 * Pi * sin(2.0 * Pi * pos_[index_i][0]);
+        func_[index_i] = sin(Pi * pos_[index_i][0]);
+        gradient_func_[index_i] = Pi * cos(Pi * pos_[index_i][0]);
     }
 
 protected:
@@ -101,7 +124,7 @@ int main(int ac, char *av[])
     /** Tag for run particle relaxation for the initial body fitted distribution. */
     sph_system.setRunParticleRelaxation(false);
     /** Tag for computation start with relaxed body fitted particles distribution. */
-    sph_system.setReloadParticles(false);
+    sph_system.setReloadParticles(true);
     //sph_system.generate_regression_data_ = true;
     sph_system.handleCommandlineOptions(ac, av);
     IOEnvironment io_environment(sph_system);
@@ -109,9 +132,10 @@ int main(int ac, char *av[])
     //	Creating bodies with corresponding materials and particles.
     //----------------------------------------------------------------------
     FluidBody water_block(sph_system, makeShared<WaterBlock>("WaterBody"));
+    water_block.defineBodyLevelSetShape();
     water_block.defineParticlesAndMaterial<FluidParticles, WeaklyCompressibleFluid>(rho0_f, c_f);
     // Using relaxed particle distribution if needed
-    sph_system.ReloadParticles()
+    (!sph_system.RunParticleRelaxation() && sph_system.ReloadParticles())
         ? water_block.generateParticles<ParticleGeneratorReload>(io_environment, water_block.getName())
         : water_block.generateParticles<ParticleGeneratorLattice>();
 
@@ -148,7 +172,7 @@ int main(int ac, char *av[])
         int ite_p = 0;
         while (ite_p < 1000)
         {
-            relaxation_step_inner.exec();
+            //relaxation_step_inner.exec();
             ite_p += 1;
             if (ite_p % 200 == 0)
             {
@@ -168,11 +192,9 @@ int main(int ac, char *av[])
     //	Define the numerical methods used in the simulation.
     //	Note that there may be data dependence on the sequence of constructions.
     //----------------------------------------------------------------------
-     /** time-space method to detect surface particles. */
-    InteractionWithUpdate<fluid_dynamics::SpatialTemporalFreeSurfaceIdentificationInner>
-        free_surface_indicator(water_body_inner);
-    InteractionWithUpdate<Gradient> initial_condition(water_body_inner, 2,0.3);
-    InteractionWithUpdate<CorrectionMatrixInner> corrected_configuration_fluid(water_body_inner, 2, 0.3);
+    SimpleDynamics<RandomNoise> rando_noise(water_block);
+    InteractionWithUpdate<Gradient> initial_condition(water_body_inner, 2, 0.0);
+    InteractionWithUpdate<CorrectionMatrixInner> corrected_configuration_fluid(water_body_inner, 2, 0.0);
     /** modify the velocity of boundary particles with free-stream velocity. */
     ReduceDynamics<fluid_dynamics::AcousticTimeStepSize> fluid_acoustic_time_step(water_block);
     PeriodicConditionUsingCellLinkedList periodic_condition_x(water_block, water_block.getBodyShapeBounds(), xAxis);
@@ -181,7 +203,7 @@ int main(int ac, char *av[])
     water_block.addBodyStateForRecording<Vecd>("GradientValue");
     water_block.addBodyStateForRecording<Real>("GiveFunction");
     water_block.addBodyStateForRecording<Real>("AnalyticalGradient");
-    water_block.addBodyStateForRecording<int>("SurfaceIndicator");
+    water_block.addBodyStateForRecording<Matd>("WeightedCorrectionMatrix");
     //----------------------------------------------------------------------
     //	Define the methods for I/O operations, observations
     //	and regression tests of the simulation.
@@ -193,8 +215,9 @@ int main(int ac, char *av[])
     //----------------------------------------------------------------------
     sph_system.initializeSystemCellLinkedLists();
     periodic_condition_x.update_cell_linked_list_.exec();
-    //periodic_condition_y.update_cell_linked_list_.exec();
+    periodic_condition_y.update_cell_linked_list_.exec();
     sph_system.initializeSystemConfigurations();
+    //rando_noise.exec();
     //----------------------------------------------------------------------
     //	Setup for time-stepping control
     //----------------------------------------------------------------------
@@ -233,8 +256,7 @@ int main(int ac, char *av[])
         Real relaxation_time = 0.0;
         Real acoustic_dt = 0.0;
            
-        free_surface_indicator.exec();
-        //corrected_configuration_fluid.exec();
+        corrected_configuration_fluid.exec();
         initial_condition.exec();
 
         acoustic_dt = fluid_acoustic_time_step.exec();
@@ -254,12 +276,12 @@ int main(int ac, char *av[])
         number_of_iterations++;
 
         /** Update cell linked list and configuration. */
-        periodic_condition_x.bounding_.exec();
+        //periodic_condition_x.bounding_.exec();
         //periodic_condition_y.bounding_.exec();
-        water_block.updateCellLinkedList();
-        periodic_condition_x.update_cell_linked_list_.exec();
+        //water_block.updateCellLinkedList();
+        //periodic_condition_x.update_cell_linked_list_.exec();
         //periodic_condition_y.update_cell_linked_list_.exec();
-        water_body_inner.updateConfiguration();
+        //water_body_inner.updateConfiguration();
         interval_updating_configuration += TickCount::now() - time_instance;
        
         body_states_recording.writeToFile();
